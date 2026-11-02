@@ -15,6 +15,7 @@
       --glass-hover: rgba(255, 255, 255, 0.1);
       --icon-gradient: linear-gradient(135deg, #a855f7, #3b82f6);
       --accent-red: #ff3b30;
+      --success: #32d74b;
     }
 
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
@@ -27,9 +28,10 @@
       -webkit-font-smoothing: antialiased;
       padding-bottom: 120px;
       min-height: 100vh;
+      overflow-x: hidden;
     }
 
-    header { padding: 20px 24px 10px; }
+    header { padding: 20px 24px 10px; position: sticky; top: 0; z-index: 10; backdrop-filter: blur(20px); background: rgba(18,18,20,0.8); }
     
     .top-bar {
       display: flex; justify-content: space-between; align-items: center;
@@ -44,11 +46,9 @@
     .view { display: none; padding: 16px 24px 20px; animation: fade 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
     .view.active { display: block; }
     
-    @keyframes fade {
-      from { opacity: 0; transform: translateY(8px); } 
-      to { opacity: 1; transform: translateY(0); }
-    }
+    @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
+    /* Empty state */
     .empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; margin-top: 40px; }
     .main-gradient-icon {
       width: 80px; height: 80px; background: var(--icon-gradient); border-radius: 24px;
@@ -56,7 +56,6 @@
       box-shadow: 0 10px 30px rgba(168, 85, 247, 0.3);
     }
     .main-gradient-icon svg { width: 40px; height: 40px; color: white; }
-
     .empty-state h2 { font-size: 22px; font-weight: 700; margin-bottom: 12px; }
     .empty-state p { font-size: 15px; line-height: 1.5; color: var(--text-muted); max-width: 280px; margin-bottom: 30px; }
 
@@ -70,6 +69,7 @@
     .btn.primary { background: var(--primary-btn); box-shadow: 0 4px 15px rgba(58, 130, 246, 0.3); }
     .btn.secondary { background: var(--glass-bg); border: 1px solid var(--glass-border); backdrop-filter: blur(10px); }
 
+    /* Albums */
     .albums-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 30px; }
     .album-card { cursor: pointer; transition: transform 0.2s; }
     .album-card:active { transform: scale(0.96); }
@@ -77,7 +77,6 @@
     .album-thumb.blue { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
     .album-thumb.orange { background: linear-gradient(135deg, #f59e0b, #b45309); }
     .album-thumb.cyan { background: linear-gradient(135deg, #06b6d4, #0e7490); }
-    
     .album-title { font-size: 16px; font-weight: 600; color: var(--text-main); }
     .album-count { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
 
@@ -92,10 +91,12 @@
     .mini-btn {
       background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);
       padding: 8px 14px; border-radius: 12px; font-size: 13px; font-weight: 600; cursor: pointer;
-      display: flex; align-items: center; gap: 6px;
+      display: flex; align-items: center; gap: 6px; transition: 0.2s;
     }
+    .mini-btn:active { transform: scale(0.95); }
     .sub-box { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 12px; font-size: 13px; color: var(--text-muted); text-align: center; }
 
+    /* Search & Grid */
     .search-box {
       background: var(--glass-bg); border: 1px solid var(--glass-border);
       border-radius: 18px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
@@ -107,25 +108,43 @@
     .ai-feedback { font-size: 13px; color: #a855f7; margin-bottom: 16px; min-height: 18px; font-weight: 500; }
 
     .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-    .grid-item { position: relative; cursor: pointer; }
-    .grid img { width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); transition: transform 0.2s; }
-    .grid-item:active img { transform: scale(0.95); }
-    .fav-badge { position: absolute; top: 6px; right: 6px; font-size: 14px; background: rgba(0,0,0,0.5); border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+    .grid-item { position: relative; cursor: pointer; border-radius: 12px; overflow: hidden;}
+    .grid img { width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); transition: transform 0.3s; display: block;}
+    .grid-item:active img { transform: scale(0.92); }
+    .fav-badge { position: absolute; top: 6px; right: 6px; font-size: 12px; background: rgba(0,0,0,0.5); border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
 
-    .modal-overlay {
+    /* Modals & Overlays */
+    .overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(20px);
       z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: 20px; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
     }
-    .modal-overlay.show { opacity: 1; pointer-events: auto; }
+    .overlay.show { opacity: 1; pointer-events: auto; }
     .modal-content { max-width: 100%; max-height: 60vh; border-radius: 16px; object-fit: contain; box-shadow: 0 20px 40px rgba(0,0,0,0.5); margin-bottom: 20px; }
     .modal-tags { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-bottom: 20px; max-width: 320px; }
     .tag-chip { background: rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 20px; font-size: 12px; color: var(--text-main); backdrop-filter: blur(10px); }
     .modal-actions { display: flex; gap: 12px; }
     .modal-btn { background: var(--glass-bg); border: 1px solid var(--glass-border); color: white; padding: 12px 20px; border-radius: 14px; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; }
     .modal-btn.danger { color: var(--accent-red); border-color: rgba(255,59,48,0.3); }
-    .modal-close { position: absolute; top: 20px; right: 20px; background: var(--glass-bg); border: none; color: white; width: 40px; height: 40px; border-radius: 50%; font-size: 20px; cursor: pointer; }
+    .modal-close { position: absolute; top: 20px; right: 20px; background: var(--glass-bg); border: none; color: white; width: 40px; height: 40px; border-radius: 50%; font-size: 20px; cursor: pointer; z-index: 210;}
 
+    /* Spinner */
+    .spinner {
+      width: 50px; height: 50px; border: 4px solid rgba(255,255,255,0.1);
+      border-top-color: #3a82f6; border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Toast Notification */
+    .toast {
+      position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: rgba(40,40,45,0.95); backdrop-filter: blur(10px); color: white;
+      padding: 12px 24px; border-radius: 30px; font-size: 14px; font-weight: 600;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5); opacity: 0; pointer-events: none; transition: 0.3s; z-index: 300;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* Tab Bar */
     .tabbar-container { position: fixed; bottom: 30px; left: 0; right: 0; display: flex; justify-content: center; z-index: 100; pointer-events: none; }
     nav.tabbar {
       pointer-events: auto; display: flex; align-items: center;
@@ -141,6 +160,10 @@
     .tab svg { width: 24px; height: 24px; transition: all 0.3s; }
     .tab.active { color: var(--text-main); }
     .tab.active svg { transform: scale(1.1); stroke-width: 2.5; }
+    
+    /* People Mockup Grid */
+    .people-grid { display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; margin-top: 20px; }
+    .person-avatar { width: 70px; height: 70px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255,255,255,0.2); }
   </style>
 </head>
 <body>
@@ -159,6 +182,7 @@
   <hr>
 </header>
 
+<!-- ================= VYN: BIBLIOTEK ================= -->
 <section class="view active" id="view-library">
   <div class="empty-state" id="emptyState">
     <div class="main-gradient-icon">
@@ -175,22 +199,24 @@
   <div id="filledLibrary" style="display:none;">
     <div class="search-box">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-      <input id="searchInput" placeholder="Sök på valfritt språk (t.ex. 'sunset', 'hund', 🍕)..." oninput="runSearch('searchInput', 'searchFeedback', 'resultGrid')">
+      <input id="searchInput" placeholder="Sök (t.ex. 'solnedgång', 'hund', 🍕)..." oninput="runSearch('searchInput', 'searchFeedback', 'resultGrid')">
     </div>
     <div class="ai-feedback" id="searchFeedback"></div>
     <div class="grid" id="resultGrid"></div>
   </div>
 </section>
 
+<!-- ================= VYN: AI SÖK ================= -->
 <section class="view" id="view-search">
   <div class="search-box" style="margin-top: 10px;">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-    <input id="aiTabInput" placeholder="Ställ en fråga eller beskriv en bild..." oninput="runSearch('aiTabInput', 'aiTabFeedback', 'aiTabGrid')">
+    <input id="aiTabInput" placeholder="Ställ en AI-fråga om dina bilder..." oninput="runSearch('aiTabInput', 'aiTabFeedback', 'aiTabGrid')">
   </div>
   <div class="ai-feedback" id="aiTabFeedback"></div>
   <div class="grid" id="aiTabGrid"></div>
 </section>
 
+<!-- ================= VYN: ALBUM ================= -->
 <section class="view" id="view-albums">
   <div class="albums-grid">
     <div class="album-card" onclick="filterAlbum('all')">
@@ -213,15 +239,39 @@
   <div class="section-box">
     <div class="section-header">
       <h3>People</h3>
-      <button class="mini-btn">Find people</button>
+      <button class="mini-btn" onclick="scanPeople()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>
+        Find people
+      </button>
     </div>
     <div class="section-desc">AI groups all photos of the same person</div>
-    <div class="sub-box">Add photos first, then AI can find the people in them.</div>
+    <div class="sub-box">Tap Find people to let AI scan faces in your library.</div>
+  </div>
+
+  <div class="section-box">
+    <div class="section-header">
+      <h3>Duplicates</h3>
+      <button class="mini-btn" onclick="scanDuplicates()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        Search
+      </button>
+    </div>
+    <div class="section-desc">Finds near-identical photos on your device</div>
+    <div class="sub-box">Tap Search and the app compares your photos.</div>
   </div>
 </section>
 
-<div class="modal-overlay" id="imageModal">
-  <button class="modal-close" onclick="closeModal()">×</button>
+<!-- ================= MODALS & OVERLAYS ================= -->
+<!-- Laddningsskärm -->
+<div class="overlay" id="loadingOverlay" style="z-index: 400;">
+  <div class="spinner"></div>
+  <h3 style="margin-top: 20px; font-weight: 600;">AI analyserar...</h3>
+  <p style="color: var(--text-muted); font-size: 14px; margin-top: 8px;">Hittar objekt och taggar</p>
+</div>
+
+<!-- Bildgranskare -->
+<div class="overlay" id="imageModal">
+  <button class="modal-close" onclick="closeModal('imageModal')">×</button>
   <img class="modal-content" id="modalImg" src="" alt="Zoomad bild">
   <div class="modal-tags" id="modalTags"></div>
   <div class="modal-actions">
@@ -230,6 +280,22 @@
   </div>
 </div>
 
+<!-- People Resultat -->
+<div class="overlay" id="peopleModal">
+  <button class="modal-close" onclick="closeModal('peopleModal')">×</button>
+  <h2 style="margin-bottom: 5px;">Hittade personer</h2>
+  <p style="color:var(--text-muted); font-size:14px; margin-bottom:20px;">AI grupperade ansikten</p>
+  <div class="people-grid">
+    <div style="text-align:center;"><img src="https://picsum.photos/seed/face1/100/100" class="person-avatar"><div style="font-size:12px; margin-top:5px;">Du</div></div>
+    <div style="text-align:center;"><img src="https://picsum.photos/seed/face2/100/100" class="person-avatar"><div style="font-size:12px; margin-top:5px;">Vän 1</div></div>
+    <div style="text-align:center;"><img src="https://picsum.photos/seed/face3/100/100" class="person-avatar"><div style="font-size:12px; margin-top:5px;">Vän 2</div></div>
+  </div>
+</div>
+
+<!-- Toast Notis -->
+<div class="toast" id="toastMsg">Notis</div>
+
+<!-- ================= FLYTANDE TAB BAR ================= -->
 <div class="tabbar-container">
   <nav class="tabbar">
     <button class="tab active" data-view="view-library" data-title="Library" onclick="switchTab(this)">
@@ -251,20 +317,15 @@
   let userPhotos = [];
   let currentActiveIndex = null;
 
+  // Synonymer för AI-sök
   const synonyms = {
-    'hund': ['dog', 'perro', 'puppy', 'vovve', 'husdjur', '🐶', '🐕'],
-    'dog': ['hund', 'perro', 'puppy', 'vovve', 'husdjur', '🐶', '🐕'],
-    'katt': ['cat', 'gato', 'kitten', 'husdjur', '🐱', '🐈'],
-    'cat': ['katt', 'gato', 'kitten', 'husdjur', '🐱', '🐈'],
-    'strand': ['beach', 'playa', 'hav', 'sea', 'ocean', 'sand', 'sommar', 'summer', '☀️', '🏖️', '🌊'],
-    'beach': ['strand', 'playa', 'hav', 'sea', 'ocean', 'sand', 'sommar', 'summer', '☀️', '🏖️', '🌊'],
-    'solnedgång': ['sunset', 'puesta', 'sol', 'sun', 'himmel', 'kväll', 'evening', '🌅'],
-    'sunset': ['solnedgång', 'puesta', 'sol', 'sun', 'himmel', 'kväll', 'evening', '🌅'],
-    'mat': ['food', 'comida', 'pizza', 'burgare', 'burger', 'lunch', 'middag', 'dinner', 'café', 'coffee', 'kaffe', '🍕', '🍔', '☕'],
-    'food': ['mat', 'comida', 'pizza', 'burgare', 'burger', 'lunch', 'middag', 'dinner', '🍕', '🍔', '☕'],
-    'natur': ['nature', 'naturaleza', 'berg', 'mountain', 'skog', 'forest', 'sjö', 'lake', '🌲', '⛰️', '🌸'],
-    'berg': ['mountain', 'montaña', 'natur', 'nature', 'vandring', 'hiking', '⛰️'],
-    'fest': ['party', 'fiesta', 'vänner', 'friends', 'musik', 'music', '🎉']
+    'hund': ['dog', 'perro', 'puppy', 'vovve', 'husdjur', '🐶', '🐕'], 'dog': ['hund', 'perro', '🐶'],
+    'katt': ['cat', 'gato', 'husdjur', '🐱'], 'cat': ['katt', 'gato', '🐱'],
+    'strand': ['beach', 'playa', 'hav', 'sea', 'sommar', '☀️', '🏖️', '🌊'], 'beach': ['strand', 'hav', '🏖️'],
+    'solnedgång': ['sunset', 'sol', 'himmel', 'kväll', '🌅'], 'sunset': ['solnedgång', 'kväll', '🌅'],
+    'mat': ['food', 'pizza', 'burgare', 'lunch', 'middag', '🍕', '🍔'], 'food': ['mat', 'pizza', '🍕'],
+    'natur': ['nature', 'berg', 'skog', 'sjö', '🌲', '⛰️'], 'berg': ['mountain', 'natur', '⛰️'],
+    'fest': ['party', 'vänner', 'musik', '🎉']
   };
 
   const samplePhotos = [
@@ -286,52 +347,63 @@
   };
 
   function saveData() {
-    try {
-      localStorage.setItem('picfinder_data', JSON.stringify(userPhotos));
-    } catch (e) {
-      alert("Bilden är för stor för att sparas lokalt. Rensar lagring för att undvika krasch.");
-    }
+    try { localStorage.setItem('picfinder_data', JSON.stringify(userPhotos)); }
+    catch (e) { showToast("Lagringen är full. Vissa bilder kunde inte sparas lokalt."); }
+  }
+
+  function showToast(msg) {
+    const toast = document.getElementById('toastMsg');
+    toast.innerText = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2500);
+  }
+
+  function simulateAI(callback) {
+    document.getElementById('loadingOverlay').classList.add('show');
+    setTimeout(() => {
+      document.getElementById('loadingOverlay').classList.remove('show');
+      callback();
+    }, 1500);
   }
 
   function openFilePicker() { document.getElementById('fileInput').click(); }
 
   function handleFiles(files) {
     if(!files || files.length === 0) return;
-    Array.from(files).forEach(file => {
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const rawName = file.name.toLowerCase();
-        let inferredTags = [rawName, 'uppladdad', 'custom'];
-        if(rawName.includes('dog') || rawName.includes('hund')) inferredTags.push('hund', 'dog');
-        if(rawName.includes('beach') || rawName.includes('strand')) inferredTags.push('strand', 'beach');
-        if(rawName.includes('food') || rawName.includes('mat')) inferredTags.push('mat', 'food');
-
-        userPhotos.unshift({ url: e.target.result, tags: inferredTags, isFav: false });
-        saveData();
-        updateGalleryView();
-      }
-      reader.readAsDataURL(file);
+    simulateAI(() => {
+      Array.from(files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const rawName = file.name.toLowerCase();
+          let inferredTags = [rawName, 'uppladdad', 'ny'];
+          if(rawName.includes('dog') || rawName.includes('hund')) inferredTags.push('hund', 'dog', 'husdjur');
+          if(rawName.includes('beach') || rawName.includes('strand')) inferredTags.push('strand', 'beach', 'sommar');
+          
+          userPhotos.unshift({ url: e.target.result, tags: inferredTags, isFav: false });
+          saveData();
+          updateGalleryView();
+        }
+        reader.readAsDataURL(file);
+      });
+      showToast("Bilder uppladdade och AI-taggade!");
     });
   }
 
   function loadSamplePhotos() {
-    userPhotos = samplePhotos.map(p => ({
-      url: `https://picsum.photos/seed/${p.seed}/300/300`,
-      tags: p.tags,
-      isFav: p.isFav
-    }));
-    saveData();
-    updateGalleryView();
+    simulateAI(() => {
+      userPhotos = samplePhotos.map(p => ({ url: `https://picsum.photos/seed/${p.seed}/300/300`, tags: p.tags, isFav: p.isFav }));
+      saveData();
+      updateGalleryView();
+      showToast("Exempelbilder inlästa");
+    });
   }
 
   function updateGalleryView() {
     document.getElementById('emptyState').style.display = userPhotos.length === 0 ? 'flex' : 'none';
     document.getElementById('filledLibrary').style.display = userPhotos.length === 0 ? 'none' : 'block';
-    
     document.getElementById('countRecent').innerText = userPhotos.length;
     document.getElementById('countFav').innerText = userPhotos.filter(p => p.isFav).length;
     document.getElementById('countAi').innerText = userPhotos.length;
-
     renderGrid(userPhotos, 'resultGrid');
   }
 
@@ -342,11 +414,11 @@
       gridEl.innerHTML = `<div style="grid-column: span 3; text-align:center; color:var(--text-muted); padding:30px;">Inga bilder hittades.</div>`;
       return;
     }
-    gridEl.innerHTML = list.map((p, index) => {
+    gridEl.innerHTML = list.map((p) => {
       const globalIndex = userPhotos.findIndex(up => up.url === p.url);
       return `
       <div class="grid-item" onclick="openModal(${globalIndex})">
-        <img src="${p.url}" alt="Bild">
+        <img src="${p.url}" loading="lazy">
         ${p.isFav ? '<div class="fav-badge">❤️</div>' : ''}
       </div>`;
     }).join('');
@@ -355,23 +427,16 @@
   function runSearch(inputId, feedbackId, gridId){
     const query = document.getElementById(inputId).value.trim().toLowerCase();
     const feedbackEl = document.getElementById(feedbackId);
-
     if(!query){
       if(feedbackEl) feedbackEl.innerText = '';
-      renderGrid(userPhotos, gridId);
-      return;
+      renderGrid(userPhotos, gridId); return;
     }
-
     const rawTokens = query.split(/[\s,\.\?\!]+/).filter(Boolean);
     let expandedTokens = [...rawTokens];
-
     rawTokens.forEach(token => {
       if(synonyms[token]) expandedTokens.push(...synonyms[token]);
-      Object.keys(synonyms).forEach(key => {
-        if(key.includes(token) || token.includes(key)) expandedTokens.push(...synonyms[key]);
-      });
+      Object.keys(synonyms).forEach(key => { if(key.includes(token) || token.includes(key)) expandedTokens.push(...synonyms[key]); });
     });
-
     const uniqueTokens = [...new Set(expandedTokens)];
     const scoredPhotos = userPhotos.map(photo => {
       let score = 0;
@@ -383,12 +448,8 @@
       });
       return { photo, score };
     });
-
-    const matched = scoredPhotos.filter(item => item.score > 0)
-                                .sort((a, b) => b.score - a.score)
-                                .map(item => item.photo);
-
-    if(feedbackEl) feedbackEl.innerText = matched.length > 0 ? `✨ AI matchade ${matched.length} bild(er)` : `Inga matchningar hittades.`;
+    const matched = scoredPhotos.filter(item => item.score > 0).sort((a, b) => b.score - a.score).map(item => item.photo);
+    if(feedbackEl) feedbackEl.innerText = matched.length > 0 ? `✨ AI matchade ${matched.length} bild(er)` : `Inga matchningar.`;
     renderGrid(matched, gridId);
   }
 
@@ -401,32 +462,39 @@
     document.getElementById('imageModal').classList.add('show');
   }
 
-  function closeModal() { document.getElementById('imageModal').classList.remove('show'); }
+  function closeModal(id) { document.getElementById(id).classList.remove('show'); }
 
   function toggleFavoriteCurrent() {
     if(currentActiveIndex !== null) {
       userPhotos[currentActiveIndex].isFav = !userPhotos[currentActiveIndex].isFav;
-      saveData();
-      openModal(currentActiveIndex);
-      updateGalleryView();
+      saveData(); openModal(currentActiveIndex); updateGalleryView();
+      showToast(userPhotos[currentActiveIndex].isFav ? "Tillagd i Favoriter ❤️" : "Borttagen från Favoriter");
     }
   }
 
   function deleteCurrentPhoto() {
-    if(currentActiveIndex !== null && confirm("Vill du radera denna bild?")) {
+    if(currentActiveIndex !== null && confirm("Vill du radera denna bild permanent?")) {
       userPhotos.splice(currentActiveIndex, 1);
-      saveData();
-      closeModal();
-      updateGalleryView();
+      saveData(); closeModal('imageModal'); updateGalleryView();
+      showToast("Bilden raderades 🗑️");
     }
   }
 
   function filterAlbum(type) {
-    const feedbackEl = document.getElementById('searchFeedback');
     document.getElementById('searchInput').value = '';
-    feedbackEl.innerText = type === 'fav' ? '❤️ Visar dina favoriter' : '';
+    document.getElementById('searchFeedback').innerText = type === 'fav' ? '❤️ Visar dina favoriter' : '';
     switchTab(document.querySelector('[data-view="view-library"]'));
     renderGrid(type === 'fav' ? userPhotos.filter(p => p.isFav) : userPhotos, 'resultGrid');
+  }
+
+  function scanPeople() {
+    if(userPhotos.length === 0) { showToast("Lägg till bilder först!"); return; }
+    simulateAI(() => { document.getElementById('peopleModal').classList.add('show'); });
+  }
+
+  function scanDuplicates() {
+    if(userPhotos.length === 0) { showToast("Lägg till bilder först!"); return; }
+    simulateAI(() => { showToast("Inga dubbletter hittades i ditt bibliotek."); });
   }
 
   function switchTab(btn){
