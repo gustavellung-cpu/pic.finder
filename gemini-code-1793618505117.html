@@ -49,7 +49,6 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
-    /* Empty state & General */
     .empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; margin-top: 40px; }
     .main-gradient-icon {
       width: 80px; height: 80px; background: var(--icon-gradient); border-radius: 24px;
@@ -71,7 +70,6 @@
     .btn.primary { background: var(--primary-btn); box-shadow: 0 4px 15px rgba(58, 130, 246, 0.3); }
     .btn.secondary { background: var(--glass-bg); border: 1px solid var(--glass-border); backdrop-filter: blur(10px); }
 
-    /* Albumbyn */
     .albums-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 30px; }
     .album-card { cursor: pointer; transition: transform 0.2s; }
     .album-card:active { transform: scale(0.96); }
@@ -98,7 +96,6 @@
     }
     .sub-box { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 12px; font-size: 13px; color: var(--text-muted); text-align: center; }
 
-    /* Sök & Grid */
     .search-box {
       background: var(--glass-bg); border: 1px solid var(--glass-border);
       border-radius: 18px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
@@ -115,7 +112,6 @@
     .grid-item:active img { transform: scale(0.95); }
     .fav-badge { position: absolute; top: 6px; right: 6px; font-size: 14px; background: rgba(0,0,0,0.5); border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
 
-    /* Modal / Bildgranskare */
     .modal-overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(20px);
       z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -130,7 +126,6 @@
     .modal-btn.danger { color: var(--accent-red); border-color: rgba(255,59,48,0.3); }
     .modal-close { position: absolute; top: 20px; right: 20px; background: var(--glass-bg); border: none; color: white; width: 40px; height: 40px; border-radius: 50%; font-size: 20px; cursor: pointer; }
 
-    /* Flytande Tab Bar */
     .tabbar-container { position: fixed; bottom: 30px; left: 0; right: 0; display: flex; justify-content: center; z-index: 100; pointer-events: none; }
     nav.tabbar {
       pointer-events: auto; display: flex; align-items: center;
@@ -164,7 +159,6 @@
   <hr>
 </header>
 
-<!-- ================= VYN: BIBLIOTEK ================= -->
 <section class="view active" id="view-library">
   <div class="empty-state" id="emptyState">
     <div class="main-gradient-icon">
@@ -188,7 +182,6 @@
   </div>
 </section>
 
-<!-- ================= VYN: AI SÖK ================= -->
 <section class="view" id="view-search">
   <div class="search-box" style="margin-top: 10px;">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
@@ -198,7 +191,6 @@
   <div class="grid" id="aiTabGrid"></div>
 </section>
 
-<!-- ================= VYN: ALBUM ================= -->
 <section class="view" id="view-albums">
   <div class="albums-grid">
     <div class="album-card" onclick="filterAlbum('all')">
@@ -228,7 +220,6 @@
   </div>
 </section>
 
-<!-- ================= BILDGRANSKARE MODAL ================= -->
 <div class="modal-overlay" id="imageModal">
   <button class="modal-close" onclick="closeModal()">×</button>
   <img class="modal-content" id="modalImg" src="" alt="Zoomad bild">
@@ -239,7 +230,6 @@
   </div>
 </div>
 
-<!-- ================= FLYTANDE TAB BAR ================= -->
 <div class="tabbar-container">
   <nav class="tabbar">
     <button class="tab active" data-view="view-library" data-title="Library" onclick="switchTab(this)">
@@ -272,9 +262,6 @@
     'sunset': ['solnedgång', 'puesta', 'sol', 'sun', 'himmel', 'kväll', 'evening', '🌅'],
     'mat': ['food', 'comida', 'pizza', 'burgare', 'burger', 'lunch', 'middag', 'dinner', 'café', 'coffee', 'kaffe', '🍕', '🍔', '☕'],
     'food': ['mat', 'comida', 'pizza', 'burgare', 'burger', 'lunch', 'middag', 'dinner', '🍕', '🍔', '☕'],
-    'pizza': ['mat', 'food', 'comida', '🍕'],
-    'kaffe': ['coffee', 'café', 'morgon', 'morning', 'drink', '☕'],
-    'coffee': ['kaffe', 'café', 'morgon', 'morning', 'drink', '☕'],
     'natur': ['nature', 'naturaleza', 'berg', 'mountain', 'skog', 'forest', 'sjö', 'lake', '🌲', '⛰️', '🌸'],
     'berg': ['mountain', 'montaña', 'natur', 'nature', 'vandring', 'hiking', '⛰️'],
     'fest': ['party', 'fiesta', 'vänner', 'friends', 'musik', 'music', '🎉']
@@ -285,25 +272,46 @@
     {seed:'dog1', tags:['hund', 'dog', 'husdjur', 'park', 'puppy'], isFav: true},
     {seed:'pizza1', tags:['mat', 'food', 'pizza', 'middag', 'dinner'], isFav: false},
     {seed:'mountain1', tags:['berg', 'mountain', 'natur', 'nature', 'vandring'], isFav: false},
-    {seed:'party1', tags:['fest', 'party', 'vänner', 'friends', 'kväll'], isFav: true},
-    {seed:'city1', tags:['stad', 'city', 'natt', 'night', 'lampor'], isFav: false}
+    {seed:'party1', tags:['fest', 'party', 'vänner', 'friends', 'kväll'], isFav: true}
   ];
+
+  window.onload = () => {
+    const savedData = localStorage.getItem('picfinder_data');
+    if(savedData) {
+      try {
+        userPhotos = JSON.parse(savedData);
+        if(userPhotos.length > 0) updateGalleryView();
+      } catch(e) { console.error("Kunde inte läsa lokal data"); }
+    }
+  };
+
+  function saveData() {
+    try {
+      localStorage.setItem('picfinder_data', JSON.stringify(userPhotos));
+    } catch (e) {
+      alert("Bilden är för stor för att sparas lokalt. Rensar lagring för att undvika krasch.");
+    }
+  }
 
   function openFilePicker() { document.getElementById('fileInput').click(); }
 
   function handleFiles(files) {
     if(!files || files.length === 0) return;
-    for(let file of files) {
-      const imageUrl = URL.createObjectURL(file);
-      const rawName = file.name.toLowerCase();
-      let inferredTags = [rawName, 'uppladdad', 'custom'];
-      if(rawName.includes('dog') || rawName.includes('hund')) inferredTags.push('hund', 'dog');
-      if(rawName.includes('beach') || rawName.includes('strand')) inferredTags.push('strand', 'beach');
-      if(rawName.includes('food') || rawName.includes('mat')) inferredTags.push('mat', 'food');
+    Array.from(files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const rawName = file.name.toLowerCase();
+        let inferredTags = [rawName, 'uppladdad', 'custom'];
+        if(rawName.includes('dog') || rawName.includes('hund')) inferredTags.push('hund', 'dog');
+        if(rawName.includes('beach') || rawName.includes('strand')) inferredTags.push('strand', 'beach');
+        if(rawName.includes('food') || rawName.includes('mat')) inferredTags.push('mat', 'food');
 
-      userPhotos.unshift({ url: imageUrl, tags: inferredTags, isFav: false });
-    }
-    updateGalleryView();
+        userPhotos.unshift({ url: e.target.result, tags: inferredTags, isFav: false });
+        saveData();
+        updateGalleryView();
+      }
+      reader.readAsDataURL(file);
+    });
   }
 
   function loadSamplePhotos() {
@@ -312,12 +320,13 @@
       tags: p.tags,
       isFav: p.isFav
     }));
+    saveData();
     updateGalleryView();
   }
 
   function updateGalleryView() {
-    document.getElementById('emptyState').style.display = 'none';
-    document.getElementById('filledLibrary').style.display = 'block';
+    document.getElementById('emptyState').style.display = userPhotos.length === 0 ? 'flex' : 'none';
+    document.getElementById('filledLibrary').style.display = userPhotos.length === 0 ? 'none' : 'block';
     
     document.getElementById('countRecent').innerText = userPhotos.length;
     document.getElementById('countFav').innerText = userPhotos.filter(p => p.isFav).length;
@@ -330,18 +339,19 @@
     const gridEl = document.getElementById(elementId);
     if(!gridEl) return;
     if(list.length === 0) {
-      gridEl.innerHTML = `<div style="grid-column: span 3; text-align:center; color:var(--text-muted); padding:30px;">Inga bilder att visa.</div>`;
+      gridEl.innerHTML = `<div style="grid-column: span 3; text-align:center; color:var(--text-muted); padding:30px;">Inga bilder hittades.</div>`;
       return;
     }
-    gridEl.innerHTML = list.map((p, index) => `
-      <div class="grid-item" onclick="openModal(${index})">
+    gridEl.innerHTML = list.map((p, index) => {
+      const globalIndex = userPhotos.findIndex(up => up.url === p.url);
+      return `
+      <div class="grid-item" onclick="openModal(${globalIndex})">
         <img src="${p.url}" alt="Bild">
         ${p.isFav ? '<div class="fav-badge">❤️</div>' : ''}
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   }
 
-  // AI Sökmotor
   function runSearch(inputId, feedbackId, gridId){
     const query = document.getElementById(inputId).value.trim().toLowerCase();
     const feedbackEl = document.getElementById(feedbackId);
@@ -363,7 +373,6 @@
     });
 
     const uniqueTokens = [...new Set(expandedTokens)];
-
     const scoredPhotos = userPhotos.map(photo => {
       let score = 0;
       photo.tags.forEach(tag => {
@@ -379,14 +388,10 @@
                                 .sort((a, b) => b.score - a.score)
                                 .map(item => item.photo);
 
-    if(feedbackEl) {
-      feedbackEl.innerText = matched.length > 0 ? `✨ AI matchade ${matched.length} bild(er)` : `Inga matchningar hittades.`;
-    }
-
+    if(feedbackEl) feedbackEl.innerText = matched.length > 0 ? `✨ AI matchade ${matched.length} bild(er)` : `Inga matchningar hittades.`;
     renderGrid(matched, gridId);
   }
 
-  // Bildgranskare (Modal)
   function openModal(index) {
     currentActiveIndex = index;
     const photo = userPhotos[index];
@@ -396,13 +401,12 @@
     document.getElementById('imageModal').classList.add('show');
   }
 
-  function closeModal() {
-    document.getElementById('imageModal').classList.remove('show');
-  }
+  function closeModal() { document.getElementById('imageModal').classList.remove('show'); }
 
   function toggleFavoriteCurrent() {
     if(currentActiveIndex !== null) {
       userPhotos[currentActiveIndex].isFav = !userPhotos[currentActiveIndex].isFav;
+      saveData();
       openModal(currentActiveIndex);
       updateGalleryView();
     }
@@ -411,18 +415,18 @@
   function deleteCurrentPhoto() {
     if(currentActiveIndex !== null && confirm("Vill du radera denna bild?")) {
       userPhotos.splice(currentActiveIndex, 1);
+      saveData();
       closeModal();
       updateGalleryView();
     }
   }
 
   function filterAlbum(type) {
-    if(type === 'fav') {
-      const favs = userPhotos.filter(p => p.isFav);
-      alert(`Visar ${favs.length} favoriter.`);
-    } else {
-      switchTab(document.querySelector('[data-view="view-library"]'));
-    }
+    const feedbackEl = document.getElementById('searchFeedback');
+    document.getElementById('searchInput').value = '';
+    feedbackEl.innerText = type === 'fav' ? '❤️ Visar dina favoriter' : '';
+    switchTab(document.querySelector('[data-view="view-library"]'));
+    renderGrid(type === 'fav' ? userPhotos.filter(p => p.isFav) : userPhotos, 'resultGrid');
   }
 
   function switchTab(btn){
