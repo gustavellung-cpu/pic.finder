@@ -1,0 +1,889 @@
+// PicFinder.swift — hela iOS-appen i en fil
+// Kräver: iOS 17+, GRDB.swift 7.x, Swift 5-läge (Default Actor Isolation = nonisolated i Xcode 26)
+
+import SwiftUI
+import Photos
+import UIKit
+import Vision
+import Accelerate
+import GRDB
+import os
+
+// MARK: - Konfiguration
+
+enum AppConfig {
+    static var apiBaseURL: URL {
+        guard let s = Bundle.main.object(forInfoDictionaryKey: "PicFinderAPIBaseURL") as? String,
+              !s.isEmpty, let url = URL(string: s) else {
+            fatalError("PicFinderAPIBaseURL saknas – kontrollera Secrets.xcconfig och Info.")
+        }
+        return url
+    }
+    static var appToken: String {
+        Bundle.main.object(forInfoDictionaryKey: "PicFinderAppToken") as? String ?? ""
+    }
+}
+
+// MARK: - Nätverk
+
+enum APIError: Error, Equatable, LocalizedError {
+    case unauthorized, invalidAPIKey, noAPIKey, badInput, badResponse
+    case rateLimited(retryAfter: TimeInterval?)
+    case server(String)
+    case network(String)
+
+    static func from(status: Int, code: String, retryAfter: TimeInterval?) -> APIError {
+        switch (status, code) {
+        case (_, "NO_API_KEY"): return .noAPIKey
+        case (_, "INVALID_API_KEY"): return .invalidAPIKey
+        case (401, _), (_, "UNAUTHORIZED"): return .unauthorized
+        case (429, _), (_, "RATE_LIMITED"): return .rateLimited(retryAfter: retryAfter)
+        case (400, _), (413, _), (_, "BAD_INPUT"): return .badInput
+        default: return .server(code.isEmpty ? "HTTP_\(status)" : code)
+        }
+    }
+
+    /// Fel som gäller alla bilder och därför ska pausa indexeringen.
+    var stopsIndexing: Bool {
+        switch self {
+        case .unauthorized, .invalidAPIKey, .noAPIKey, .rateLimited, .network: return true
+        default: return false
+        }
+    }
+
+    var errorDescription: String? {
+        switch self {
+        case .unauthorized: return "Appen nekades av servern. Kontrollera appnyckeln."
+        case .invalidAPIKey: return "Serverns Gemini-nyckel är ogiltig."
+        case .noAPIKey: return "Servern saknar Gemini-nyckel."
+        case .badInput: return "Bilden kunde inte skickas för analys."
+        case .badResponse: return "Oväntat svar från servern."
+        case .rateLimited: return "För många förfrågningar just nu. Försök igen om en stund."
+        case .server(let code): return "Serverfel (\(code))."
+        case .network: return "Ingen anslutning till servern."
+        }
+    }
+}
+
+struct ImageAnalysis: Codable, Sendable, Equatable {
+    struct DetectedObject: Codable, Sendable, Equatable {
+        let name: String
+        let attributes: [String]?
+    }
+    let description: String
+    let mediaType: String
+    let objects: [DetectedObject]
+    let relations: [String]
+    let scene: [String]
+    let activities: [String]?
+    let visibleText: String?
+    let tags: [String]
+}
+
+struct APIClient: Sendable {
+    enum EmbedTask: String, Encodable, Sendable {
+        case document = "RETRIEVAL_DOCUMENT"
+        case query = "RETRIEVAL_QUERY"
+    }
+
+    private let baseURL: URL
+    private let token: String
+    private let session: URLSession
+
+    init(baseURL: URL = AppConfig.apiBaseURL, token: String = AppConfig.appToken, session: URLSession? = nil) {
+        self.baseURL = baseURL
+        self.token = token
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        self.session = session ?? URLSession(configuration: config)
+    }
+
+    func analyze(jpegData: Data) async throws -> (model: String, analysis: ImageAnalysis) {
+        struct Body: Encodable { let imageBase64: String; let mimeType: String }
+        struct Resp: Decodable { let model: String; let analysis: ImageAnalysis }
+        let r: Resp = try await post("v1/analyze", Body(imageBase64: jpegData.base64EncodedString(), mimeType: "image/jpeg"))
+        return (r.model, r.analysis)
+    }
+
+    func embed(_ texts: [String], task: EmbedTask) async throws -> (model: String, vectors: [[Float]]) {
+        struct Body: Encodable { let texts: [String]; let taskType: EmbedTask }
+        struct Resp: Decodable { let model: String; let vectors: [[Float]] }
+        let r: Resp = try await post("v1/embed", Body(texts: texts, taskType: task))
+        guard r.vectors.count == texts.count else { throw APIError.badResponse }
+        return (r.model, r.vectors)
+    }
+
+    private struct ErrorBody: Decodable { let code: String? }
+
+    private func post<B: Encodable, R: Decodable>(_ path: String, _ body: B, attempt: Int = 0) async throws -> R {
+        var req = URLRequest(url: baseURL.appending(path: path))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONEncoder().encode(body)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch let e as URLError where e.code == .cancelled {
+            throw CancellationError()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw APIError.network(error.localizedDescription)
+        }
+
+        guard let http = response as? HTTPURLResponse else { throw APIError.badResponse }
+        if (200..<300).contains(http.statusCode) {
+            do { return try JSONDecoder().decode(R.self, from: data) } catch { throw APIError.badResponse }
+        }
+
+        let code = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.code ?? ""
+        let retryAfter = http.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
+        let error = APIError.from(status: http.statusCode, code: code, retryAfter: retryAfter)
+
+        // Vänta och försök igen vid hastighetsbegränsning, högst två gånger
+        if case .rateLimited(let ra) = error, attempt < 2 {
+            try await Task.sleep(for: .seconds(min(ra ?? pow(2, Double(attempt + 1)), 30)))
+            return try await post(path, body, attempt: attempt + 1)
+        }
+        throw error
+    }
+}
+
+// MARK: - Bildbibliotek (PhotoKit)
+
+struct AssetSnapshot: Sendable, Equatable {
+    let id: String
+    let created: Date?
+    let modified: Date?
+}
+
+enum PhotoLibraryError: Error { case imageUnavailable }
+
+@MainActor @Observable
+final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
+    private(set) var status: PHAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    @ObservationIgnored var onChange: (@MainActor () -> Void)?
+    @ObservationIgnored private var isObserving = false
+
+    func requestAccess() async {
+        status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        startObservingIfAllowed()
+    }
+
+    func startObservingIfAllowed() {
+        guard !isObserving, status == .authorized || status == .limited else { return }
+        PHPhotoLibrary.shared().register(self)
+        isObserving = true
+    }
+
+    func presentLimitedPicker() {
+        guard let root = UIApplication.shared.connectedScenes
+            .compactMap({ ($0 as? UIWindowScene)?.keyWindow?.rootViewController }).first else { return }
+        PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: root)
+    }
+
+    nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
+        Task { @MainActor in
+            self.status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            self.onChange?()
+        }
+    }
+
+    /// Bilder som appen har åtkomst till. Vid begränsad åtkomst blir det bara de valda bilderna.
+    nonisolated static func snapshot() -> [AssetSnapshot] {
+        let options = PHFetchOptions()
+        options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        let result = PHAsset.fetchAssets(with: options)
+        var out: [AssetSnapshot] = []
+        out.reserveCapacity(result.count)
+        result.enumerateObjects { asset, _, _ in
+            out.append(.init(id: asset.localIdentifier, created: asset.creationDate, modified: asset.modificationDate))
+        }
+        return out
+    }
+
+    /// Hämtar en nedskalad bild. Laddar ner från iCloud vid behov och kan avbrytas.
+    nonisolated static func loadImage(for asset: PHAsset, maxPixel: CGFloat) async throws -> UIImage {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .highQualityFormat // ger exakt ett anrop tillbaka
+        options.resizeMode = .exact
+        options.isNetworkAccessAllowed = true
+        let requestID = OSAllocatedUnfairLock<PHImageRequestID?>(initialState: nil)
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
+                let id = PHImageManager.default().requestImage(
+                    for: asset,
+                    targetSize: CGSize(width: maxPixel, height: maxPixel),
+                    contentMode: .aspectFit,
+                    options: options
+                ) { image, info in
+                    if (info?[PHImageCancelledKey] as? Bool) == true { cont.resume(throwing: CancellationError()); return }
+                    if let error = info?[PHImageErrorKey] as? Error { cont.resume(throwing: error); return }
+                    guard let image else { cont.resume(throwing: PhotoLibraryError.imageUnavailable); return }
+                    cont.resume(returning: image)
+                }
+                requestID.withLock { $0 = id }
+            }
+        } onCancel: {
+            if let id = requestID.withLock({ $0 }) { PHImageManager.default().cancelImageRequest(id) }
+        }
+    }
+}
+
+// MARK: - OCR (Vision, på enheten)
+
+enum VisionOCR {
+    static func recognizeText(in cgImage: CGImage) async throws -> String {
+        try await Task.detached(priority: .utility) {
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            // Använd svenska och engelska bara om iOS-versionen stöder dem
+            let supported = (try? request.supportedRecognitionLanguages()) ?? []
+            let wanted = ["sv-SE", "en-US"].filter(supported.contains)
+            if !wanted.isEmpty { request.recognitionLanguages = wanted }
+
+            try VNImageRequestHandler(cgImage: cgImage).perform([request])
+            return (request.results ?? [])
+                .compactMap { $0.topCandidates(1).first?.string }
+                .joined(separator: "\n")
+        }.value
+    }
+}
+
+// MARK: - Sökdokument (texten som görs om till en vektor)
+
+enum SearchDocument {
+    static func build(analysis a: ImageAnalysis, ocrText: String, creationDate: Date?, calendar: Calendar = .current) -> String {
+        var lines = ["Beskrivning: \(a.description)", "Typ: \(a.mediaType)"]
+
+        let objects = a.objects.map { (($0.attributes ?? []) + [$0.name]).joined(separator: " ") }
+        if !objects.isEmpty { lines.append("Objekt: \(objects.joined(separator: ", "))") }
+        if !a.relations.isEmpty { lines.append("Relationer: \(a.relations.joined(separator: "; "))") }
+        if !a.scene.isEmpty { lines.append("Miljö: \(a.scene.joined(separator: ", "))") }
+        if let act = a.activities, !act.isEmpty { lines.append("Aktiviteter: \(act.joined(separator: ", "))") }
+        if !a.tags.isEmpty { lines.append("Sökord: \(a.tags.joined(separator: ", "))") }
+
+        if let date = creationDate {
+            let month = date.formatted(.dateTime.month(.wide).year().locale(Locale(identifier: "sv_SE")))
+            lines.append("Tid: \(season(for: date, calendar: calendar)), \(month)")
+        }
+
+        let text = [a.visibleText ?? "", ocrText]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        if !text.isEmpty { lines.append("Text i bilden: \(String(text.prefix(1500)))") }
+
+        return String(lines.joined(separator: "\n").prefix(7500))
+    }
+
+    /// Årstid på norra halvklotet. Behövs för frågor som "bilder från vintern".
+    static func season(for date: Date, calendar: Calendar = .current) -> String {
+        switch calendar.component(.month, from: date) {
+        case 12, 1, 2: return "vinter"
+        case 3, 4, 5: return "vår"
+        case 6, 7, 8: return "sommar"
+        default: return "höst"
+        }
+    }
+}
+
+// MARK: - Lokal databas (GRDB/SQLite + FTS5)
+
+struct IndexedAsset: Codable, FetchableRecord, PersistableRecord, Sendable {
+    static let databaseTableName = "indexed_asset"
+    enum Status: String, Codable, Sendable { case pending, indexed, failed }
+
+    var localIdentifier: String
+    var creationDate: Date?
+    var modificationDate: Date?
+    var status: Status
+    var mediaType: String?
+    var descriptionText: String?
+    var analysisJSON: String?
+    var ocrText: String?
+    var searchDocument: String?
+    var embedding: Data?
+    var embeddingModel: String?
+    var analysisModel: String?
+    var lastError: String?
+    var indexedAt: Date?
+
+    static func pending(_ s: AssetSnapshot) -> IndexedAsset {
+        .init(localIdentifier: s.id, creationDate: s.created, modificationDate: s.modified, status: .pending)
+    }
+}
+
+struct StoredEmbedding: Sendable {
+    let id: String
+    let vector: [Float]
+}
+
+extension Array where Element == Float {
+    var data: Data { withUnsafeBufferPointer { Data(buffer: $0) } }
+
+    init(data: Data) {
+        let count = data.count / MemoryLayout<Float>.stride
+        self = [Float](unsafeUninitializedCapacity: count) { buffer, initialized in
+            _ = data.copyBytes(to: buffer)
+            initialized = count
+        }
+    }
+}
+
+final class IndexDatabase: Sendable {
+    let writer: any DatabaseWriter
+
+    static func makeShared() throws -> IndexDatabase {
+        let dir = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                              appropriateFor: nil, create: true)
+        return try IndexDatabase(DatabasePool(path: dir.appending(path: "picfinder.sqlite").path))
+    }
+
+    static func inMemory() throws -> IndexDatabase { try IndexDatabase(DatabaseQueue()) }
+
+    init(_ writer: any DatabaseWriter) throws {
+        self.writer = writer
+        var migrator = DatabaseMigrator()
+        migrator.registerMigration("v1") { db in
+            try db.create(table: "indexed_asset") { t in
+                t.primaryKey("localIdentifier", .text)
+                t.column("creationDate", .datetime).indexed()
+                t.column("modificationDate", .datetime)
+                t.column("status", .text).notNull().indexed()
+                t.column("mediaType", .text)
+                t.column("descriptionText", .text)
+                t.column("analysisJSON", .text)
+                t.column("ocrText", .text)
+                t.column("searchDocument", .text)
+                t.column("embedding", .blob)
+                t.column("embeddingModel", .text)
+                t.column("analysisModel", .text)
+                t.column("lastError", .text)
+                t.column("indexedAt", .datetime)
+            }
+            try db.create(virtualTable: "indexed_asset_fts", using: FTS5()) { t in
+                t.synchronize(withTable: "indexed_asset")
+                t.tokenizer = .unicode61()
+                t.column("searchDocument")
+                t.column("ocrText")
+            }
+        }
+        try migrator.migrate(writer)
+    }
+
+    /// Lägger till nya bilder som väntande och tar bort bilder som inte längre finns eller är tillgängliga.
+    func sync(with snapshot: [AssetSnapshot]) async throws -> (added: Int, removed: Int) {
+        try await writer.write { db in
+            let existing = Set(try String.fetchAll(db, sql: "SELECT localIdentifier FROM indexed_asset"))
+            let current = Set(snapshot.map(\.id))
+            let removed = existing.subtracting(current)
+            for id in removed { _ = try IndexedAsset.deleteOne(db, key: id) }
+            var added = 0
+            for s in snapshot where !existing.contains(s.id) {
+                try IndexedAsset.pending(s).insert(db)
+                added += 1
+            }
+            return (added, removed.count)
+        }
+    }
+
+    func pendingIdentifiers(limit: Int) async throws -> [String] {
+        try await writer.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT localIdentifier FROM indexed_asset
+                WHERE status = 'pending' ORDER BY creationDate DESC LIMIT ?
+                """, arguments: [limit])
+        }
+    }
+
+    func save(_ record: IndexedAsset) async throws {
+        try await writer.write { db in try record.save(db) }
+    }
+
+    func markFailed(_ id: String, message: String) async throws {
+        try await writer.write { db in
+            try db.execute(sql: "UPDATE indexed_asset SET status = 'failed', lastError = ? WHERE localIdentifier = ?",
+                           arguments: [message, id])
+        }
+    }
+
+    func delete(_ id: String) async throws {
+        _ = try await writer.write { db in try IndexedAsset.deleteOne(db, key: id) }
+    }
+
+    func embeddings(model: String) async throws -> [StoredEmbedding] {
+        try await writer.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT localIdentifier, embedding FROM indexed_asset
+                WHERE status = 'indexed' AND embeddingModel = ? AND embedding IS NOT NULL
+                """, arguments: [model]).map { row in
+                StoredEmbedding(id: row["localIdentifier"], vector: [Float](data: row["embedding"]))
+            }
+        }
+    }
+
+    /// Ordträffar (OCR och beskrivning) via FTS5. Poängen bygger på plats i listan: bästa träffen får 1.0.
+    func lexicalScores(for query: String, limit: Int = 200) async throws -> [String: Float] {
+        guard let pattern = FTS5Pattern(matchingAnyTokenIn: query) else { return [:] }
+        return try await writer.read { db in
+            let ids = try String.fetchAll(db, sql: """
+                SELECT indexed_asset.localIdentifier FROM indexed_asset
+                JOIN indexed_asset_fts ON indexed_asset_fts.rowid = indexed_asset.rowid
+                WHERE indexed_asset_fts MATCH ?
+                ORDER BY bm25(indexed_asset_fts) LIMIT ?
+                """, arguments: [pattern, limit])
+            var scores: [String: Float] = [:]
+            for (i, id) in ids.enumerated() {
+                scores[id] = 1 - Float(i) / Float(max(ids.count, 1))
+            }
+            return scores
+        }
+    }
+}
+
+// MARK: - Rangordning (betydelse + ord)
+
+struct SearchResult: Identifiable, Sendable, Equatable {
+    let id: String
+    let semantic: Float
+    let lexical: Float
+    let score: Float
+}
+
+struct RankingOptions: Sendable {
+    var semanticWeight: Float = 0.75
+    var minSemantic: Float = 0.55  // startvärde, kalibreras mot riktiga sökningar
+    var maxGapFromTop: Float = 0.12
+    var limit = 60
+}
+
+enum Ranker {
+    static func normalize(_ v: [Float]) -> [Float] {
+        let n = sqrt(vDSP.sumOfSquares(v))
+        return n > 0 ? vDSP.divide(v, n) : v
+    }
+
+    static func rank(query: [Float], candidates: [StoredEmbedding], lexical: [String: Float],
+                     options: RankingOptions = .init()) -> [SearchResult] {
+        let q = normalize(query)
+        var scored: [SearchResult] = []
+        for c in candidates where c.vector.count == q.count {
+            let s = vDSP.dot(q, c.vector) // lagrade vektorer är redan normaliserade
+            guard s >= options.minSemantic else { continue }
+            let l = lexical[c.id] ?? 0
+            scored.append(.init(id: c.id, semantic: s, lexical: l,
+                                score: options.semanticWeight * s + (1 - options.semanticWeight) * l))
+        }
+        guard let top = scored.map(\.semantic).max() else { return [] }
+        return Array(scored
+            .filter { top - $0.semantic <= options.maxGapFromTop }
+            .sorted { $0.score > $1.score }
+            .prefix(options.limit))
+    }
+}
+
+// MARK: - Sökmotor
+
+struct SearchOutcome: Sendable {
+    let results: [SearchResult]
+    let textOnly: Bool
+}
+
+actor SearchEngine {
+    private let db: IndexDatabase
+    private let api: APIClient
+    private let options: RankingOptions
+    private var cache: [StoredEmbedding]?
+    private var cacheModel: String?
+
+    init(db: IndexDatabase, api: APIClient, options: RankingOptions = .init()) {
+        self.db = db
+        self.api = api
+        self.options = options
+    }
+
+    func invalidate() { cache = nil }
+
+    func search(_ raw: String) async throws -> SearchOutcome {
+        let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return .init(results: [], textOnly: false) }
+
+        let lexical = try await db.lexicalScores(for: query)
+
+        let queryVector: [Float]
+        let model: String
+        do {
+            let r = try await api.embed([query], task: .query)
+            guard let v = r.vectors.first else { throw APIError.badResponse }
+            queryVector = v
+            model = r.model
+        } catch let e as APIError {
+            // Utan nätverk: visa bara ordträffar och märk dem tydligt som det
+            if case .network = e {
+                let fallback = lexical.sorted { $0.value > $1.value }.prefix(options.limit)
+                    .map { SearchResult(id: $0.key, semantic: 0, lexical: $0.value, score: $0.value) }
+                return .init(results: Array(fallback), textOnly: true)
+            }
+            throw e
+        }
+
+        try Task.checkCancellation()
+        if cache == nil || cacheModel != model {
+            cache = try await db.embeddings(model: model)
+            cacheModel = model
+        }
+        return .init(results: Ranker.rank(query: queryVector, candidates: cache ?? [], lexical: lexical, options: options),
+                     textOnly: false)
+    }
+}
+
+// MARK: - Indexering
+
+@MainActor @Observable
+final class IndexingController {
+    enum Phase: Equatable {
+        case idle, scanning, finished
+        case indexing(done: Int, total: Int)
+        case paused(String)
+    }
+
+    private(set) var phase: Phase = .idle
+    @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var needsRerun = false
+    private let maxConcurrent = 3
+    let db: IndexDatabase
+    let api: APIClient
+    let search: SearchEngine
+
+    init(db: IndexDatabase, api: APIClient, search: SearchEngine) {
+        self.db = db
+        self.api = api
+        self.search = search
+    }
+
+    func start() {
+        guard task == nil else { needsRerun = true; return }
+        task = Task { [weak self] in
+            await self?.run()
+            guard let self else { return }
+            self.task = nil
+            if self.needsRerun {
+                self.needsRerun = false
+                self.start()
+            }
+        }
+    }
+
+    func cancel() {
+        needsRerun = false
+        task?.cancel()
+    }
+
+    func libraryDidChange() { start() }
+
+    private func run() async {
+        phase = .scanning
+        do {
+            let snapshot = await Task.detached(priority: .utility) { PhotoLibraryService.snapshot() }.value
+            _ = try await db.sync(with: snapshot)
+            await search.invalidate()
+
+            let pending = try await db.pendingIdentifiers(limit: 100_000)
+            guard !pending.isEmpty else { phase = .finished; return }
+
+            var done = 0
+            phase = .indexing(done: 0, total: pending.count)
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                var it = pending.makeIterator()
+                for _ in 0..<maxConcurrent {
+                    if let id = it.next() { group.addTask { try await self.indexOne(id) } }
+                }
+                while try await group.next() != nil {
+                    done += 1
+                    phase = .indexing(done: done, total: pending.count)
+                    if done % 25 == 0 { await search.invalidate() }
+                    if let id = it.next() { group.addTask { try await self.indexOne(id) } }
+                }
+            }
+            await search.invalidate()
+            phase = .finished
+        } catch is CancellationError {
+            phase = .paused("Indexeringen är pausad.")
+        } catch {
+            await search.invalidate()
+            phase = .paused(error.localizedDescription)
+        }
+    }
+
+    /// Fel som bara gäller en bild markerar bilden som misslyckad. Fel som gäller alla bilder pausar indexeringen.
+    nonisolated private func indexOne(_ id: String) async throws {
+        try Task.checkCancellation()
+        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject else {
+            try await db.delete(id)
+            return
+        }
+
+        let image: UIImage
+        do {
+            image = try await PhotoLibraryService.loadImage(for: asset, maxPixel: 768)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            try await db.markFailed(id, message: "Bilden kunde inte läsas (finns den bara i iCloud?)")
+            return
+        }
+
+        // Ny JPEG från pixlarna, så att EXIF- och platsdata inte följer med
+        guard let cg = image.cgImage, let jpeg = image.jpegData(compressionQuality: 0.7) else {
+            try await db.markFailed(id, message: "Bilden kunde inte kodas.")
+            return
+        }
+
+        let ocr = (try? await VisionOCR.recognizeText(in: cg)) ?? ""
+
+        do {
+            let (analysisModel, analysis) = try await api.analyze(jpegData: jpeg)
+            let doc = SearchDocument.build(analysis: analysis, ocrText: ocr, creationDate: asset.creationDate)
+            let (embeddingModel, vectors) = try await api.embed([doc], task: .document)
+            guard let vector = vectors.first, !vector.isEmpty else { throw APIError.badResponse }
+
+            try await db.save(IndexedAsset(
+                localIdentifier: id,
+                creationDate: asset.creationDate,
+                modificationDate: asset.modificationDate,
+                status: .indexed,
+                mediaType: analysis.mediaType,
+                descriptionText: analysis.description,
+                analysisJSON: String(data: try JSONEncoder().encode(analysis), encoding: .utf8),
+                ocrText: ocr.isEmpty ? nil : ocr,
+                searchDocument: doc,
+                embedding: Ranker.normalize(vector).data,
+                embeddingModel: embeddingModel,
+                analysisModel: analysisModel,
+                lastError: nil,
+                indexedAt: .now
+            ))
+        } catch let e as APIError where !e.stopsIndexing {
+            try await db.markFailed(id, message: e.localizedDescription)
+        }
+    }
+}
+
+// MARK: - App och beroenden
+
+@MainActor @Observable
+final class AppEnvironment {
+    let db: IndexDatabase
+    let api: APIClient
+    let library: PhotoLibraryService
+    let search: SearchEngine
+    let indexer: IndexingController
+
+    init() {
+        do { db = try IndexDatabase.makeShared() } catch { fatalError("Kunde inte öppna databasen: \(error)") }
+        api = APIClient()
+        library = PhotoLibraryService()
+        search = SearchEngine(db: db, api: api)
+        indexer = IndexingController(db: db, api: api, search: search)
+        library.onChange = { [weak indexer] in indexer?.libraryDidChange() }
+    }
+}
+
+@main
+struct PicFinderApp: App {
+    @State private var env = AppEnvironment()
+    var body: some Scene {
+        WindowGroup { RootView().environment(env) }
+    }
+}
+
+// MARK: - Vyer
+
+struct RootView: View {
+    @Environment(AppEnvironment.self) private var env
+    @AppStorage("cloudAnalysisConsent") private var consent = false
+
+    var body: some View {
+        switch env.library.status {
+        case .authorized, .limited:
+            if consent { SearchScreen() } else { ConsentView { consent = true } }
+        case .notDetermined:
+            ContentUnavailableView {
+                Label("Hitta bilder med egna ord", systemImage: "sparkle.magnifyingglass")
+            } description: {
+                Text("PicFinder behöver åtkomst till dina bilder för att kunna söka i dem.")
+            } actions: {
+                Button("Ge åtkomst") { Task { await env.library.requestAccess() } }
+                    .buttonStyle(.borderedProminent)
+            }
+        default:
+            ContentUnavailableView {
+                Label("Ingen åtkomst till bilder", systemImage: "photo.badge.exclamationmark")
+            } description: {
+                Text("Ge PicFinder åtkomst i Inställningar för att kunna söka.")
+            } actions: {
+                Button("Öppna Inställningar") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
+            }
+        }
+    }
+}
+
+struct ConsentView: View {
+    let onAccept: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Så analyseras dina bilder").font(.title2.bold())
+            Text("För att förstå vad bilderna föreställer skickas en nedskalad kopia (högst 768 pixlar, utan plats- och EXIF-data) av varje bild till PicFinders server och vidare till Google Gemini. Text som telefonen läser ut ur bilderna skickas också för att bygga sökindexet.")
+            Text("Bilderna skickas aldrig i full upplösning. Analysresultaten sparas bara på din telefon.")
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Jag godkänner", action: onAccept)
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(24)
+    }
+}
+
+struct SearchScreen: View {
+    enum SearchState {
+        case idle, searching, empty
+        case results([SearchResult], textOnly: Bool)
+        case failed(String)
+    }
+
+    @Environment(AppEnvironment.self) private var env
+    @State private var query = ""
+    @State private var state: SearchState = .idle
+    @State private var searchTask: Task<Void, Never>?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                IndexStatusBar()
+                content.frame(maxHeight: .infinity)
+            }
+            .navigationTitle("PicFinder")
+            .searchable(text: $query, prompt: "Beskriv bilden du letar efter")
+            .onSubmit(of: .search, runSearch)
+            .toolbar {
+                if env.library.status == .limited {
+                    Button("Välj bilder") { env.library.presentLimitedPicker() }
+                }
+            }
+            .task {
+                env.library.startObservingIfAllowed()
+                env.indexer.start()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch state {
+        case .idle:
+            ContentUnavailableView("Sök med egna ord", systemImage: "sparkle.magnifyingglass",
+                                   description: Text("T.ex. ”hunden på stranden i solnedgången”"))
+        case .searching:
+            ProgressView("Söker …")
+        case .empty:
+            ContentUnavailableView.search(text: query)
+        case .failed(let message):
+            ContentUnavailableView("Sökningen misslyckades", systemImage: "exclamationmark.triangle",
+                                   description: Text(message))
+        case .results(let results, let textOnly):
+            ScrollView {
+                if textOnly {
+                    Text("Ingen anslutning – visar bara träffar på text och ord.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 2)], spacing: 2) {
+                    ForEach(results) { AssetThumbnail(localIdentifier: $0.id) }
+                }
+            }
+        }
+    }
+
+    private func runSearch() {
+        searchTask?.cancel()
+        let q = query
+        state = .searching
+        searchTask = Task {
+            do {
+                let outcome = try await env.search.search(q)
+                guard !Task.isCancelled else { return }
+                state = outcome.results.isEmpty ? .empty : .results(outcome.results, textOnly: outcome.textOnly)
+            } catch is CancellationError {
+            } catch {
+                state = .failed(error.localizedDescription)
+            }
+        }
+    }
+}
+
+struct AssetThumbnail: View {
+    let localIdentifier: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        Color(.secondarySystemBackground)
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                if let image { Image(uiImage: image).resizable().scaledToFill() }
+            }
+            .clipped()
+            .task(id: localIdentifier) {
+                guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil).firstObject else { return }
+                image = try? await PhotoLibraryService.loadImage(for: asset, maxPixel: 300)
+            }
+    }
+}
+
+struct IndexStatusBar: View {
+    @Environment(AppEnvironment.self) private var env
+
+    var body: some View {
+        switch env.indexer.phase {
+        case .idle, .finished:
+            EmptyView()
+        case .scanning:
+            bar {
+                ProgressView()
+                Text("Läser bildbiblioteket …")
+            }
+        case .indexing(let done, let total):
+            bar {
+                ProgressView(value: Double(done), total: Double(max(total, 1)))
+                Text("\(done)/\(total)").monospacedDigit()
+                Button("Pausa") { env.indexer.cancel() }
+            }
+        case .paused(let reason):
+            bar {
+                Image(systemName: "pause.circle")
+                Text(reason).lineLimit(2)
+                Spacer()
+                Button("Fortsätt") { env.indexer.start() }
+            }
+        }
+    }
+
+    private func bar<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        HStack(spacing: 10, content: content)
+            .font(.footnote)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.bar)
+    }
+}
